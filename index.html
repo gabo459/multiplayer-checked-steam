@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam Co-Op Finder - ¿A qué jugamos hoy?</title>
+    <style>
+        :root {
+            --bg-color: #0e141b;
+            --panel-bg: #1b2838;
+            --accent-color: #66c0f4;
+            --accent-green: #10b981;
+            --text-color: #f3f3f3;
+            --border-color: #2a475e;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #sidebar {
+            width: 350px;
+            background-color: var(--panel-bg);
+            padding: 20px;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 10;
+            overflow-y: auto;
+        }
+
+        h1 {
+            font-size: 1.1rem;
+            color: var(--accent-color);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 0.85rem;
+            color: #acb2b8;
+        }
+
+        textarea {
+            background: #101822;
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            width: 100%;
+            height: 110px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        textarea:focus { outline: none; border-color: var(--accent-color); }
+
+        button {
+            background: linear-gradient(90deg, #47bfff 0%, #1a9fff 100%);
+            border: none;
+            color: white;
+            font-weight: bold;
+            padding: 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:active { transform: scale(0.98); }
+
+        #status {
+            font-size: 0.8rem;
+            color: var(--accent-color);
+            min-height: 20px;
+            line-height: 1.4;
+        }
+
+        #main-content {
+            flex: 1;
+            padding: 25px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        #users-bar {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            background: var(--panel-bg);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .user-badge {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #101822;
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .user-badge img {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1.5px solid var(--accent-color);
+        }
+
+        .user-badge span {
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        #games-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 15px;
+        }
+
+        .game-card {
+            background: var(--panel-bg);
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.2s;
+        }
+
+        .game-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--accent-color);
+        }
+
+        .game-card img {
+            width: 100%;
+            height: 110px;
+            object-fit: cover;
+            background: #000;
+        }
+
+        .game-info {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+        }
+
+        .game-title {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .game-stats {
+            font-size: 0.75rem;
+            color: #acb2b8;
+            margin-top: auto;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding-top: 6px;
+        }
+
+        .combined-hours {
+            color: var(--accent-green);
+            font-weight: bold;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h1>Steam Co-Op Finder</h1>
+        <p style="font-size: 0.8rem; color: #acb2b8;">Compara las bibliotecas de tu grupo y descubre a qué pueden jugar juntos.</p>
+        
+        <div class="control-group">
+            <label for="users-input">Perfiles o URLs (1 por línea):</label>
+            <textarea id="users-input" placeholder="https://steamcommunity.com/id/usuario1&#10;https://steamcommunity.com/id/usuario2"></textarea>
+        </div>
+
+        <button id="btn-compare">Buscar Juegos en Común</button>
+
+        <div id="status">Ingresa al menos 2 perfiles para comenzar.</div>
+    </div>
+
+    <div id="main-content">
+        <div id="users-bar" style="display: none;"></div>
+        <div id="games-grid"></div>
+    </div>
+
+    <script>
+        const WORKER_URL = "https://steamproxy.ernestoygabo.workers.dev/";
+
+        const btnCompare = document.getElementById('btn-compare');
+        const usersInput = document.getElementById('users-input');
+        const statusEl = document.getElementById('status');
+        const usersBar = document.getElementById('users-bar');
+        const gamesGrid = document.getElementById('games-grid');
+
+        function formatHours(minutes) {
+            if (!minutes || minutes <= 0) return '0h';
+            const h = Math.round(minutes / 60);
+            return h.toLocaleString() + 'h';
+        }
+
+        async function fetchUserData(userInput) {
+            const url = `${WORKER_URL}?user=${encodeURIComponent(userInput.trim())}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
+            return await res.json();
+        }
+
+        btnCompare.addEventListener('click', async () => {
+            const lines = usersInput.value.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+            if (lines.length < 2) {
+                alert("Debes ingresar al menos 2 usuarios/URLs para comparar.");
+                return;
+            }
+
+            statusEl.textContent = `Consultando ${lines.length} bibliotecas de Steam...`;
+            gamesGrid.innerHTML = '';
+            usersBar.style.display = 'none';
+            usersBar.innerHTML = '';
+
+            try {
+                // Consulta paralela de todos los usuarios
+                const results = await Promise.all(lines.map(line => fetchUserData(line)));
+                
+                const validProfiles = [];
+                const userLibraries = [];
+
+                results.forEach((data, index) => {
+                    if (data.response && data.response.games) {
+                        const player = data.player || {};
+                        const name = player.personaname || lines[index];
+                        const avatar = player.avatarfull || player.avatar || '';
+                        
+                        validProfiles.push({ name, avatar, totalGames: data.response.game_count });
+                        userLibraries.push(data.response.games);
+                    }
+                });
+
+                if (userLibraries.length < 2) {
+                    statusEl.textContent = "Error: No se pudieron obtener las bibliotecas públicas de al menos 2 usuarios.";
+                    return;
+                }
+
+                // Mostrar cabecera de participantes
+                validProfiles.forEach(prof => {
+                    const badge = document.createElement('div');
+                    badge.className = 'user-badge';
+                    badge.innerHTML = `
+                        <img src="${prof.avatar || 'https://via.placeholder.com/32'}" alt="avatar">
+                        <span>${prof.name}</span>
+                    `;
+                    usersBar.appendChild(badge);
+                });
+                usersBar.style.display = 'flex';
+
+                // Cálculo de la Intersección (Juegos presentes en TODOS los usuarios)
+                let sharedGamesMap = new Map();
+
+                // Inicializar mapa con la primera biblioteca
+                userLibraries[0].forEach(game => {
+                    sharedGamesMap.set(game.appid, {
+                        appid: game.appid,
+                        name: game.name,
+                        playtimes: [game.playtime_forever || 0]
+                    });
+                });
+
+                // Filtrar con las bibliotecas restantes
+                for (let i = 1; i < userLibraries.length; i++) {
+                    const currentLibraryMap = new Map(userLibraries[i].map(g => [g.appid, g.playtime_forever || 0]));
+                    
+                    for (const [appid, gameData] of sharedGamesMap.entries()) {
+                        if (currentLibraryMap.has(appid)) {
+                            gameData.playtimes.push(currentLibraryMap.get(appid));
+                        } else {
+                            sharedGamesMap.delete(appid); // Si un usuario no lo tiene, se remueve
+                        }
+                    }
+                }
+
+                const commonGames = Array.from(sharedGamesMap.values());
+
+                if (commonGames.length === 0) {
+                    statusEl.textContent = "No se encontraron juegos en común en las cuentas ingresadas.";
+                    return;
+                }
+
+                // Ordenar juegos por horas combinadas totales del grupo (descendente)
+                commonGames.sort((a, b) => {
+                    const totalA = a.playtimes.reduce((sum, p) => sum + p, 0);
+                    const totalB = b.playtimes.reduce((sum, p) => sum + p, 0);
+                    return totalB - totalA;
+                });
+
+                statusEl.textContent = `¡Se encontraron ${commonGames.length} juegos en común!`;
+
+                // Renderizar tarjetas de juegos compartidos
+                commonGames.forEach(game => {
+                    const totalMinutes = game.playtimes.reduce((sum, p) => sum + p, 0);
+                    const headerUrl = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${game.appid}/header.jpg`;
+                    const proxyImg = `https://wsrv.nl/?url=${encodeURIComponent(headerUrl)}&output=webp&q=80`;
+
+                    const card = document.createElement('div');
+                    card.className = 'game-card';
+                    card.innerHTML = `
+                        <img src="${proxyImg}" onerror="this.src='https://via.placeholder.com/460x215/1b2838/66c0f4?text=${encodeURIComponent(game.name)}'">
+                        <div class="game-info">
+                            <div class="game-title">${game.name}</div>
+                            <div class="game-stats">
+                                Total grupo: <span class="combined-hours">${formatHours(totalMinutes)}</span>
+                            </div>
+                        </div>
+                    `;
+                    gamesGrid.appendChild(card);
+                });
+
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = "Ocurrió un error al procesar las bibliotecas.";
+            }
+        });
+    </script>
+</body>
+</html>
