@@ -55,7 +55,7 @@
             color: #acb2b8;
         }
 
-        textarea {
+        input[type="password"], input[type="text"], textarea {
             background: #101822;
             border: 1px solid var(--border-color);
             color: #fff;
@@ -63,12 +63,15 @@
             border-radius: 4px;
             font-size: 0.85rem;
             width: 100%;
-            height: 110px;
-            resize: vertical;
             font-family: inherit;
         }
 
-        textarea:focus { outline: none; border-color: var(--accent-color); }
+        textarea {
+            height: 110px;
+            resize: vertical;
+        }
+
+        input:focus, textarea:focus { outline: none; border-color: var(--accent-color); }
 
         button {
             background: linear-gradient(90deg, #47bfff 0%, #1a9fff 100%);
@@ -197,6 +200,11 @@
     <div id="sidebar">
         <h1>Steam Co-Op Finder</h1>
         <p style="font-size: 0.8rem; color: #acb2b8;">Compara las bibliotecas de tu grupo y descubre a qué pueden jugar juntos.</p>
+
+        <div class="control-group">
+            <label for="api-key-input">Steam Web API Key:</label>
+            <input type="password" id="api-key-input" placeholder="Ingresa tu API Key de Steam">
+        </div>
         
         <div class="control-group">
             <label for="users-input">Perfiles o URLs (1 por línea):</label>
@@ -205,7 +213,7 @@
 
         <button id="btn-compare">Buscar Juegos en Común</button>
 
-        <div id="status">Ingresa al menos 2 perfiles para comenzar.</div>
+        <div id="status">Ingresa tu API Key y al menos 2 perfiles para comenzar.</div>
     </div>
 
     <div id="main-content">
@@ -217,10 +225,17 @@
         const WORKER_URL = "https://steamproxy.ernestoygabo.workers.dev/";
 
         const btnCompare = document.getElementById('btn-compare');
+        const apiKeyInput = document.getElementById('api-key-input');
         const usersInput = document.getElementById('users-input');
         const statusEl = document.getElementById('status');
         const usersBar = document.getElementById('users-bar');
         const gamesGrid = document.getElementById('games-grid');
+
+        // Cargar API Key guardada previamente
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedKey = localStorage.getItem('steam_user_api_key');
+            if (savedKey) apiKeyInput.value = savedKey;
+        });
 
         function formatHours(minutes) {
             if (!minutes || minutes <= 0) return '0h';
@@ -228,20 +243,29 @@
             return h.toLocaleString() + 'h';
         }
 
-        async function fetchUserData(userInput) {
-            const url = `${WORKER_URL}?user=${encodeURIComponent(userInput.trim())}`;
+        async function fetchUserData(userInput, apiKey) {
+            const url = `${WORKER_URL}?user=${encodeURIComponent(userInput.trim())}&key=${encodeURIComponent(apiKey.trim())}`;
             const res = await fetch(url);
             if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
             return await res.json();
         }
 
         btnCompare.addEventListener('click', async () => {
+            const apiKey = apiKeyInput.value.trim();
             const lines = usersInput.value.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+            if (!apiKey) {
+                alert("Debes ingresar tu Steam API Key.");
+                return;
+            }
 
             if (lines.length < 2) {
                 alert("Debes ingresar al menos 2 usuarios/URLs para comparar.");
                 return;
             }
+
+            // Guardar API Key localmente
+            localStorage.setItem('steam_user_api_key', apiKey);
 
             statusEl.textContent = `Consultando ${lines.length} bibliotecas de Steam...`;
             gamesGrid.innerHTML = '';
@@ -249,8 +273,8 @@
             usersBar.innerHTML = '';
 
             try {
-                // Consulta paralela de todos los usuarios
-                const results = await Promise.all(lines.map(line => fetchUserData(line)));
+                // Consulta paralela pasando la API key externa
+                const results = await Promise.all(lines.map(line => fetchUserData(line, apiKey)));
                 
                 const validProfiles = [];
                 const userLibraries = [];
@@ -271,7 +295,6 @@
                     return;
                 }
 
-                // Mostrar cabecera de participantes
                 validProfiles.forEach(prof => {
                     const badge = document.createElement('div');
                     badge.className = 'user-badge';
@@ -283,10 +306,8 @@
                 });
                 usersBar.style.display = 'flex';
 
-                // Cálculo de la Intersección (Juegos presentes en TODOS los usuarios)
                 let sharedGamesMap = new Map();
 
-                // Inicializar mapa con la primera biblioteca
                 userLibraries[0].forEach(game => {
                     sharedGamesMap.set(game.appid, {
                         appid: game.appid,
@@ -295,7 +316,6 @@
                     });
                 });
 
-                // Filtrar con las bibliotecas restantes
                 for (let i = 1; i < userLibraries.length; i++) {
                     const currentLibraryMap = new Map(userLibraries[i].map(g => [g.appid, g.playtime_forever || 0]));
                     
@@ -303,7 +323,7 @@
                         if (currentLibraryMap.has(appid)) {
                             gameData.playtimes.push(currentLibraryMap.get(appid));
                         } else {
-                            sharedGamesMap.delete(appid); // Si un usuario no lo tiene, se remueve
+                            sharedGamesMap.delete(appid);
                         }
                     }
                 }
@@ -315,7 +335,6 @@
                     return;
                 }
 
-                // Ordenar juegos por horas combinadas totales del grupo (descendente)
                 commonGames.sort((a, b) => {
                     const totalA = a.playtimes.reduce((sum, p) => sum + p, 0);
                     const totalB = b.playtimes.reduce((sum, p) => sum + p, 0);
@@ -324,7 +343,6 @@
 
                 statusEl.textContent = `¡Se encontraron ${commonGames.length} juegos en común!`;
 
-                // Renderizar tarjetas de juegos compartidos
                 commonGames.forEach(game => {
                     const totalMinutes = game.playtimes.reduce((sum, p) => sum + p, 0);
                     const headerUrl = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${game.appid}/header.jpg`;
@@ -346,7 +364,7 @@
 
             } catch (err) {
                 console.error(err);
-                statusEl.textContent = "Ocurrió un error al procesar las bibliotecas.";
+                statusEl.textContent = "Ocurrió un error al procesar las bibliotecas. Revisa tu API Key e intentalo de nuevo.";
             }
         });
     </script>
