@@ -149,6 +149,7 @@
             display: flex;
             flex-direction: column;
             transition: transform 0.2s;
+            position: relative;
         }
 
         .game-card:hover {
@@ -161,6 +162,19 @@
             height: 110px;
             object-fit: cover;
             background: #000;
+        }
+
+        .copies-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(16, 185, 129, 0.9);
+            color: #fff;
+            font-size: 0.7rem;
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
         }
 
         .game-info {
@@ -180,12 +194,23 @@
             text-overflow: ellipsis;
         }
 
+        .owners-list {
+            font-size: 0.72rem;
+            color: #8f98a0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .game-stats {
             font-size: 0.75rem;
             color: #acb2b8;
             margin-top: auto;
             border-top: 1px solid rgba(255, 255, 255, 0.05);
             padding-top: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .combined-hours {
@@ -199,7 +224,7 @@
 
     <div id="sidebar">
         <h1>Steam Co-Op Finder</h1>
-        <p style="font-size: 0.8rem; color: #acb2b8;">Compara las bibliotecas de tu grupo y descubre a qué pueden jugar juntos.</p>
+        <p style="font-size: 0.8rem; color: #acb2b8;">Compara las bibliotecas de tu grupo y descubre qué juegos tienen 2 o más copias.</p>
 
         <div class="control-group">
             <label for="api-key-input">Steam Web API Key:</label>
@@ -211,7 +236,7 @@
             <textarea id="users-input" placeholder="https://steamcommunity.com/id/usuario1&#10;https://steamcommunity.com/id/usuario2"></textarea>
         </div>
 
-        <button id="btn-compare">Buscar Juegos en Común</button>
+        <button id="btn-compare">Buscar Juegos Repetidos (2+ Copias)</button>
 
         <div id="status">Ingresa tu API Key y al menos 2 perfiles para comenzar.</div>
     </div>
@@ -231,7 +256,6 @@
         const usersBar = document.getElementById('users-bar');
         const gamesGrid = document.getElementById('games-grid');
 
-        // Cargar API Key guardada previamente
         document.addEventListener('DOMContentLoaded', () => {
             const savedKey = localStorage.getItem('steam_user_api_key');
             if (savedKey) apiKeyInput.value = savedKey;
@@ -264,7 +288,6 @@
                 return;
             }
 
-            // Guardar API Key localmente
             localStorage.setItem('steam_user_api_key', apiKey);
 
             statusEl.textContent = `Consultando ${lines.length} bibliotecas de Steam...`;
@@ -273,7 +296,6 @@
             usersBar.innerHTML = '';
 
             try {
-                // Consulta paralela pasando la API key externa
                 const results = await Promise.all(lines.map(line => fetchUserData(line, apiKey)));
                 
                 const validProfiles = [];
@@ -306,56 +328,60 @@
                 });
                 usersBar.style.display = 'flex';
 
-                let sharedGamesMap = new Map();
+                // Consolidar todos los juegos y contar dueños
+                const familyGamesMap = new Map();
 
-                userLibraries[0].forEach(game => {
-                    sharedGamesMap.set(game.appid, {
-                        appid: game.appid,
-                        name: game.name,
-                        playtimes: [game.playtime_forever || 0]
+                userLibraries.forEach((library, index) => {
+                    const ownerName = validProfiles[index].name;
+                    library.forEach(game => {
+                        if (!familyGamesMap.has(game.appid)) {
+                            familyGamesMap.set(game.appid, {
+                                appid: game.appid,
+                                name: game.name,
+                                totalMinutes: 0,
+                                owners: []
+                            });
+                        }
+                        const gData = familyGamesMap.get(game.appid);
+                        gData.owners.push(ownerName);
+                        gData.totalMinutes += (game.playtime_forever || 0);
                     });
                 });
 
-                for (let i = 1; i < userLibraries.length; i++) {
-                    const currentLibraryMap = new Map(userLibraries[i].map(g => [g.appid, g.playtime_forever || 0]));
-                    
-                    for (const [appid, gameData] of sharedGamesMap.entries()) {
-                        if (currentLibraryMap.has(appid)) {
-                            gameData.playtimes.push(currentLibraryMap.get(appid));
-                        } else {
-                            sharedGamesMap.delete(appid);
-                        }
-                    }
-                }
+                // Filtrar únicamente juegos con 2 o más copias
+                const duplicateGames = Array.from(familyGamesMap.values())
+                    .filter(game => game.owners.length >= 2);
 
-                const commonGames = Array.from(sharedGamesMap.values());
-
-                if (commonGames.length === 0) {
-                    statusEl.textContent = "No se encontraron juegos en común en las cuentas ingresadas.";
+                if (duplicateGames.length === 0) {
+                    statusEl.textContent = "No se encontraron juegos con 2 o más copias en las cuentas ingresadas.";
                     return;
                 }
 
-                commonGames.sort((a, b) => {
-                    const totalA = a.playtimes.reduce((sum, p) => sum + p, 0);
-                    const totalB = b.playtimes.reduce((sum, p) => sum + p, 0);
-                    return totalB - totalA;
+                // Ordenar por número de copias (descendente) y luego por total de horas jugadas
+                duplicateGames.sort((a, b) => {
+                    if (b.owners.length !== a.owners.length) {
+                        return b.owners.length - a.owners.length;
+                    }
+                    return b.totalMinutes - a.totalMinutes;
                 });
 
-                statusEl.textContent = `¡Se encontraron ${commonGames.length} juegos en común!`;
+                statusEl.textContent = `¡Se encontraron ${duplicateGames.length} juegos con 2 o más copias!`;
 
-                commonGames.forEach(game => {
-                    const totalMinutes = game.playtimes.reduce((sum, p) => sum + p, 0);
+                duplicateGames.forEach(game => {
                     const headerUrl = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${game.appid}/header.jpg`;
                     const proxyImg = `https://wsrv.nl/?url=${encodeURIComponent(headerUrl)}&output=webp&q=80`;
 
                     const card = document.createElement('div');
                     card.className = 'game-card';
                     card.innerHTML = `
+                        <span class="copies-badge">${game.owners.length} copias</span>
                         <img src="${proxyImg}" onerror="this.src='https://via.placeholder.com/460x215/1b2838/66c0f4?text=${encodeURIComponent(game.name)}'">
                         <div class="game-info">
                             <div class="game-title">${game.name}</div>
+                            <div class="owners-list" title="${game.owners.join(', ')}">Dueños: ${game.owners.join(', ')}</div>
                             <div class="game-stats">
-                                Total grupo: <span class="combined-hours">${formatHours(totalMinutes)}</span>
+                                <span>Total grupo:</span>
+                                <span class="combined-hours">${formatHours(game.totalMinutes)}</span>
                             </div>
                         </div>
                     `;
@@ -364,7 +390,7 @@
 
             } catch (err) {
                 console.error(err);
-                statusEl.textContent = "Ocurrió un error al procesar las bibliotecas. Revisa tu API Key e intentalo de nuevo.";
+                statusEl.textContent = "Ocurrió un error al procesar las bibliotecas. Revisa tu API Key e inténtalo de nuevo.";
             }
         });
     </script>
